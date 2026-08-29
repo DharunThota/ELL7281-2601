@@ -41,8 +41,10 @@ NODE *create_and_initialize_node(int key){
 }
 
 void insert_into_root_list(FIB_HEAP *H, NODE *x){
-    if(H->root_list == NULL){
+    if(H->root_list == NULL){// fix when we are inserting the very first child we are not updating its left and right pointer to itself 
         H->root_list = x;
+        x ->left = x;
+        x ->right = x;
     }
     else{
         x->right = H->root_list;
@@ -71,6 +73,10 @@ void insert_into_child_list(NODE *parent, NODE *new_child){
         new_child->left = parent->child->left;
         parent->child->left->right = new_child;
         parent->child->left = new_child;
+    } 
+    else{// fix when we are inserting the very first child we are not updating its left and right pointer to itself 
+        new_child->left = new_child;
+        new_child ->right = new_child;
     }
     new_child->p = parent;
     parent->child = new_child;
@@ -126,24 +132,43 @@ void compare_degrees(FIB_HEAP *H, NODE **A, NODE *x){
 
 void consolidate(FIB_HEAP *H){
     //D(n) = O(logn)
-    NODE **A = (NODE **)malloc(D_N * sizeof(NODE));
-    memset(A, '\0', D_N);
-    
-    NODE *x = H->root_list;
-    NODE *last = x->left;
-    //for each node in the root list
-    while(x != last){
-        NODE *next = x->right;
-        compare_degrees(H, A, x);
-        x = next;
-    }
-    //for the last node; missed in the while loop
-    compare_degrees(H, A, last);
+    NODE **A = (NODE **)malloc(D_N * sizeof(NODE *)); // correction: elements of A should hold the address of the nodes, so we need to use the NODE* type instead of NODE.
+    memset(A, '\0', D_N*sizeof(NODE *)); // fix: arguments of memsset (ptr, value, size{in bytes})
 
+    // counting number of root nodes in the root list
+    int count_roots = 0;
+    NODE *curr = H -> root_list;
+    if(curr != NULL){
+        do{
+            count_roots++;
+            curr = curr ->right;
+        }while(curr != H ->root_list);
+    }
+
+    // saving the root nodes addresses in an array to traverse them
+    NODE **root_nodes = (NODE**)malloc(count_roots * sizeof(NODE *));
+    curr = H ->root_list;
+    for(int i =0; i < count_roots; i++){
+        root_nodes[i] = curr;
+        curr = curr ->right;
+    }
+
+    // traveersing the root nodes from to compare the degree
+    for(int i = 0; i< count_roots; i++){
+        compare_degrees(H,A,root_nodes[i]);
+    }
+    free(root_nodes);
+
+    // rebiliding the root list to get the correct total node count
     H->min = NULL;
-    for(int i=0;i<D_N;i++){
+    H->root_list = NULL;
+    for(int i=0; i<D_N; i++){
         if(A[i]){
-            fib_heap_insert(H, A[i]);
+            insert_into_root_list(H, A[i]);
+            // upadting fib heap min's manually
+            if(H->min == NULL || A[i]->key < H->min->key){ 
+                H->min = A[i];
+            }
         }
     }
 
@@ -221,15 +246,10 @@ NODE *fib_heap_extract_min(FIB_HEAP *H){
         if(z->child != NULL){
             NODE *head = z->child;
             NODE *curr = head;
-
+            // leads to infinite loop because of last node right is pointing to itself.
+            // fix: not touching the last node's right pointer
             do {
                 NODE *next = curr->right;
-                curr->left->right = curr->right;
-                curr->right->left = curr->left;
-
-                curr->left = curr;
-                curr->right = curr;
-
                 curr->p = NULL;
                 insert_into_root_list(H, curr);
                 curr = next;
@@ -241,10 +261,16 @@ NODE *fib_heap_extract_min(FIB_HEAP *H){
         }
 
         //TODO 2: remove z from root list
+        // fix: if fib heap has only one node, we need to set the root list and min to NULL
         remove_from_root_list(H, z);
-        H->min = z->right;
-        consolidate(H);
-
+        if(z == z->right){
+            H->min = NULL;
+            H->root_list = NULL;
+        }
+        else{
+            H->min = z->right;
+            consolidate(H);
+        }
         H->n -= 1;
     }
     return z;
