@@ -389,9 +389,14 @@ NODE *fib_heap_extract_min(FIB_HEAP *H){
 
         //remove z from root list
         remove_from_root_list(H, z);
-        H->min = z->right;
-        consolidate(H);
-
+        if(z == z->right){
+            H->min = NULL;
+            H->root_list = NULL;
+        }
+        else{
+            H->min = z->right;
+            consolidate(H);
+        }
         H->n -= 1;
     }
     return z;
@@ -418,24 +423,22 @@ void fib_heap_decrease_key(FIB_HEAP *H, NODE *x, int new_key){
 
 int main(){
     FIB_HEAP *h = make_fib_heap();
- 
     int keys[] = {5, 3, 17, 24, 7, 18, 52, 38, 30, 26, 46};
     int nkeys = sizeof(keys) / sizeof(keys[0]);
- 
+    NODE *node[20]; // keep pointers around so we can decrease_key on them later
+
     for(int i = 0; i < nkeys; i++){
-        NODE *node = create_and_initialize_node(keys[i]);
-        fib_heap_insert(h, node);
+        node[i] = create_and_initialize_node(keys[i]);
+        fib_heap_insert(h, node[i]);
     }
- 
     printf("After inserting %d keys:\n", nkeys);
     print_fib_heap(h);
- 
+
     NODE *extracted = fib_heap_extract_min(h);
     printf("Extracted min: %d\n\n", extracted->key);
- 
     printf("After extract_min (note the merged trees from consolidate):\n");
     print_fib_heap(h);
- 
+
     // manually mark a node just to demonstrate how marked nodes are rendered
     if(h->root_list && h->root_list->child){
         h->root_list->child->mark = true;
@@ -445,10 +448,76 @@ int main(){
 
     extracted = fib_heap_extract_min(h);
     printf("Extracted min: %d\n\n", extracted->key);
- 
     printf("After extract_min (note the merged trees from consolidate):\n");
     print_fib_heap(h);
-    
+
+    // --- find_min: just peeks, does not remove ---
+    NODE *peek = fib_heap_find_min(h);
+    printf(">>> find_min: current min is %d (heap still has n=%d nodes)\n\n", peek->key, h->n);
+
+    // --- decrease_key: pick a node that is currently NOT a root, so we can
+    //     see it get cut and promoted to the root list ---
+    printf(">>> decrease_key demo\n");
+    NODE *child = NULL;
+    for(int i = 0; i < nkeys; i++){
+        // skip nodes that were already extracted above (they're no longer in the heap)
+        if(node[i] == extracted) continue;
+        if(node[i]->p != NULL){ child = node[i]; break; }
+    }
+    if(child){
+        int old_key = child->key;
+        int parent_key = child->p->key;
+        int new_key = parent_key - 1; // guarantee it violates min-heap order, forcing a cut
+        printf("decreasing node %d (currently a child of %d) down to %d\n",
+               old_key, parent_key, new_key);
+        fib_heap_decrease_key(h, child, new_key);
+        printf("node %d is now a root: %s\n", new_key, (child->p == NULL) ? "yes" : "no");
+        printf("new min via find_min: %d\n\n", fib_heap_find_min(h)->key);
+        print_fib_heap(h);
+    }
+    else{
+        printf("(no non-root node available to demonstrate a cut)\n\n");
+    }
+
+    // --- decrease_key misuse: trying to increase a key should be rejected ---
+    printf(">>> decrease_key with an invalid (larger) key -- should be rejected\n");
+    NODE *still_present = NULL;
+    for(int i = 0; i < nkeys; i++){
+        if(node[i] != extracted && node[i] != child){ still_present = node[i]; break; }
+    }
+    if(still_present){
+        int before = still_present->key;
+        fib_heap_decrease_key(h, still_present, before + 1000);
+        printf("attempted to raise %d -> %d; key is now %d (unchanged: %s)\n\n",
+               before, before + 1000, still_present->key,
+               still_present->key == before ? "yes" : "no");
+    }
+
+    // --- extract_min again after the decrease_key, to show it respects the new key ---
+    extracted = fib_heap_extract_min(h);
+    printf(">>> extract_min after decrease_key: %d\n\n", extracted->key);
+    print_fib_heap(h);
+
+    // --- drain everything else, verifying sorted order the whole way ---
+    printf(">>> draining the rest of the heap to confirm sorted extraction order\n");
+    int prev = -1, ok = 1, count = 0;
+    while(h->n > 0){
+        NODE *m = fib_heap_extract_min(h);
+        if(!m){ printf("*** unexpected NULL extract ***\n"); ok = 0; break; }
+        if(m->key < prev){ printf("*** ORDER VIOLATION: %d after %d ***\n", m->key, prev); ok = 0; }
+        printf("  extracted %d\n", m->key);
+        print_fib_heap(h);
+        prev = m->key;
+        count++;
+    }
+    printf("Drained %d remaining nodes in sorted order: %s\n", count, ok ? "PASS" : "FAIL");
+
+    // --- extracting from an empty heap should return NULL, not crash ---
+    NODE *empty_extract = fib_heap_extract_min(h);
+    // printf("extracted val: %d, min value: %d\n", empty_extract->key, h->min->key);
+
+    printf(">>> extract_min on empty heap returned: %s\n",
+           empty_extract == NULL ? "NULL (correct)" : "non-NULL (bug)");
 
     return 0;
 }
