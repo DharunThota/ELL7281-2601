@@ -3,10 +3,15 @@
 #include <stdio.h>
 #include <string.h>
 
-#define D_N 100
+//CONSTANTS
+#define D_N 100 // max degree bound, sizes consolidate()'s auxiliary array
 
+// safety caps for visualization
+#define MAX_TRAVERSE 10000     
+#define MAX_DEPTH 200          
+#define MAX_PRINT_SIBLINGS 50  
 
-/*STRUCT DEFINITIONS*/
+//STRUCT DEFINITIONS
 typedef struct _node{
     int key;                    //value stored in the node
     struct _node *p;            //pointer to parent
@@ -22,12 +27,36 @@ typedef struct heap{
     NODE *root_list;
 } FIB_HEAP;
 
-/*FUNCTION DECLARATIONS*/
-void fib_heap_insert(FIB_HEAP *H, NODE *x);
+//FUNCTION DECLARATIONS 
+
+//utilities 
+NODE *create_and_initialize_node(int key);
+void insert_into_root_list(FIB_HEAP *H, NODE *x);
+void remove_from_root_list(FIB_HEAP *H, NODE *x);
+void insert_into_child_list(NODE *parent, NODE *new_child);
+void remove_from_child_list(NODE *parent, NODE *c);
+void fib_heap_link(FIB_HEAP *H, NODE *y, NODE *x);
+void compare_degrees(FIB_HEAP *H, NODE **A, NODE *x);
+void consolidate(FIB_HEAP *H);
+void cut(FIB_HEAP *H, NODE *x, NODE *y);
+void cascading_cut(FIB_HEAP *H, NODE *y);
+
+//visualization
+int count_siblings(NODE *start);
+void print_fib_tree(NODE *node, NODE *min, const char *prefix, bool is_last, int depth);
+void collect_marked_nodes_impl(NODE *start, NODE **out, int *count, int max, int depth);
+void collect_marked_nodes(NODE *start, NODE **out, int *count, int max);
+void print_marked_nodes(FIB_HEAP *H);
 void print_fib_heap(FIB_HEAP *H);
 
+//heap operations
+FIB_HEAP *make_fib_heap();
+void fib_heap_insert(FIB_HEAP *H, NODE *x);
+NODE *fib_heap_find_min(FIB_HEAP *H);
+NODE *fib_heap_extract_min(FIB_HEAP *H);
+void fib_heap_decrease_key(FIB_HEAP *H, NODE *x, int new_key);
 
-/*UTILITIES*/
+//UTILITIES
 NODE *create_and_initialize_node(int key){
     NODE *node = (NODE *)malloc(sizeof(NODE));
     node->key = key;
@@ -104,7 +133,7 @@ void fib_heap_link(FIB_HEAP *H, NODE *y, NODE *x){
 
     //make y child of x, increment degree of x
     insert_into_child_list(x,y);
-    
+
     y->mark = false;
     return;
 }
@@ -135,7 +164,7 @@ void consolidate(FIB_HEAP *H){
 
     NODE **A = (NODE **)malloc(D_N * sizeof(NODE));
     memset(A, '\0', D_N * sizeof(NODE));
-    
+
     NODE *x = H->root_list;
     NODE *last = x->left;
     //for each node in the root list
@@ -188,14 +217,9 @@ void cascading_cut(FIB_HEAP *H, NODE *y){
     return;
 }
 
-/*VISUALIZATION*/
- 
-#define MAX_TRAVERSE 10000 // safety cap: a well-formed heap never gets close to this
- 
-// counts the number of siblings in a circular doubly linked list, starting at 'start'.
-// stops early (and flags it) if the list doesn't cycle back within MAX_TRAVERSE steps,
-// which indicates a corrupted circular list rather than looping forever
-static int count_siblings(NODE *start){
+//VISUALIZATION 
+// counts siblings in a circular doubly linked list starting at 'start'
+int count_siblings(NODE *start){
     if(!start) return 0;
     int count = 0;
     NODE *curr = start;
@@ -203,41 +227,33 @@ static int count_siblings(NODE *start){
         count++;
         curr = curr->right;
     }while(curr != start && count < MAX_TRAVERSE);
- 
+
     if(count >= MAX_TRAVERSE){
         printf("  [!] WARNING: sibling list did not cycle back to start after %d nodes -- likely a corrupted circular list\n", MAX_TRAVERSE);
     }
     return count;
 }
- 
-// recursively prints a node and its children using tree-drawing connectors,
-// e.g.:
-// ├── 5 (degree=2)
-// │   ├── 8 [marked]
-// │   └── 12
-// └── 7 (MIN)
-#define MAX_DEPTH 200      // safety cap: no legitimate fibonacci-heap tree nests this deep
-#define MAX_PRINT_SIBLINGS 50 // safety cap: never print more than this many siblings at one level
- 
-static void print_fib_tree(NODE *node, NODE *min, const char *prefix, bool is_last, int depth){
+
+// recursively prints a node and its children with tree-drawing connectors
+void print_fib_tree(NODE *node, NODE *min, const char *prefix, bool is_last, int depth){
     printf("%s%s", prefix, is_last ? "\xe2\x94\x94\xe2\x94\x80\xe2\x94\x80 " : "\xe2\x94\x9c\xe2\x94\x80\xe2\x94\x80 ");
- 
+
     printf("%d", node->key);
     if(node == min)   printf("  <-- MIN");
     if(node->mark)    printf("  [marked]");
     printf("  (degree=%d)\n", node->degree);
- 
+
     if(depth >= MAX_DEPTH){
         printf("%s    [!] WARNING: hit max recursion depth (%d) -- likely a parent/child cycle, stopping here\n",
                prefix, MAX_DEPTH);
         return;
     }
- 
+
     if(node->child){
         char new_prefix[512];
         snprintf(new_prefix, sizeof(new_prefix), "%s%s", prefix,
                  is_last ? "    " : "\xe2\x94\x82   ");
- 
+
         int total = count_siblings(node->child);
         int print_limit = total < MAX_PRINT_SIBLINGS ? total : MAX_PRINT_SIBLINGS;
         int idx = 0;
@@ -247,16 +263,15 @@ static void print_fib_tree(NODE *node, NODE *min, const char *prefix, bool is_la
             print_fib_tree(curr, min, new_prefix, idx == print_limit, depth + 1);
             curr = curr->right;
         }while(curr != node->child && idx < print_limit);
- 
+
         if(total > MAX_PRINT_SIBLINGS){
             printf("%s    [!] ... %d more children not shown (truncated)\n", new_prefix, total - MAX_PRINT_SIBLINGS);
         }
     }
 }
- 
-// recursively walks every node in the heap (root list + all descendants)
-// and collects the ones with mark == true
-static void collect_marked_nodes_impl(NODE *start, NODE **out, int *count, int max, int depth){
+
+// recursively walks the heap (root list + descendants), collecting marked nodes
+void collect_marked_nodes_impl(NODE *start, NODE **out, int *count, int max, int depth){
     if(!start || depth >= MAX_DEPTH) return;
     NODE *curr = start;
     int steps = 0;
@@ -271,20 +286,20 @@ static void collect_marked_nodes_impl(NODE *start, NODE **out, int *count, int m
         steps++;
     }while(curr != start && steps < MAX_TRAVERSE);
 }
- 
-static void collect_marked_nodes(NODE *start, NODE **out, int *count, int max){
+
+void collect_marked_nodes(NODE *start, NODE **out, int *count, int max){
     collect_marked_nodes_impl(start, out, count, max, 0);
 }
- 
+
 // prints a summary line of every marked node currently in the heap
 void print_marked_nodes(FIB_HEAP *H){
     NODE *marked[1024];
     int count = 0;
- 
+
     if(H->root_list){
         collect_marked_nodes(H->root_list, marked, &count, 1024);
     }
- 
+
     printf("Marked nodes (%d): ", count);
     if(count == 0){
         printf("none\n");
@@ -295,23 +310,22 @@ void print_marked_nodes(FIB_HEAP *H){
         }
     }
 }
- 
-// prints the whole fibonacci heap: each root-list tree drawn with its
-// children indented underneath, the current min highlighted, and marked
-// nodes flagged inline as well as summarized at the end
+
+// prints the whole heap: each root-list tree with children indented,
+// current min highlighted, marked nodes flagged inline and summarized
 void print_fib_heap(FIB_HEAP *H){
     printf("========================================\n");
     printf("Fibonacci Heap  (n = %d)\n", H->n);
     printf("========================================\n");
- 
+
     if(H->root_list == NULL){
         printf("(empty heap)\n\n");
         return;
     }
- 
+
     printf("Min node: %d\n\n", H->min ? H->min->key : -1);
     printf("Root list:\n");
- 
+
     int total = count_siblings(H->root_list);
     int print_limit = total < MAX_PRINT_SIBLINGS ? total : MAX_PRINT_SIBLINGS;
     int idx = 0;
@@ -321,17 +335,17 @@ void print_fib_heap(FIB_HEAP *H){
         print_fib_tree(curr, H->min, "", idx == print_limit, 0);
         curr = curr->right;
     }while(curr != H->root_list && idx < print_limit);
- 
+
     if(total > MAX_PRINT_SIBLINGS){
         printf("    [!] ... %d more root-list trees not shown (truncated)\n", total - MAX_PRINT_SIBLINGS);
     }
- 
+
     printf("\n");
     print_marked_nodes(H);
     printf("\n");
 }
 
-/*HEAP OPERATIONS*/
+//HEAP OPERATIONS
 FIB_HEAP *make_fib_heap(){
     FIB_HEAP *temp = (FIB_HEAP *)malloc(sizeof(FIB_HEAP));
 
@@ -404,7 +418,7 @@ NODE *fib_heap_extract_min(FIB_HEAP *H){
 
 void fib_heap_decrease_key(FIB_HEAP *H, NODE *x, int new_key){
     if(new_key > x->key){
-        printf("new key greater than current key");
+        printf("new key greater than current key\n");
         return;
     }
 
@@ -417,13 +431,14 @@ void fib_heap_decrease_key(FIB_HEAP *H, NODE *x, int new_key){
     if(x->key < H->min->key){
         H->min = x;
     }
-    
+
     return;
 }
 
 int main(){
     FIB_HEAP *h = make_fib_heap();
-    int keys[] = {5, 3, 17, 24, 7, 18, 52, 38, 30, 26, 46};
+    // int keys[] = {5, 3, 17, 24, 7, 18, 52, 46, 38, 30, 26};
+    int keys[] = {4, 7, 2, 5};
     int nkeys = sizeof(keys) / sizeof(keys[0]);
     NODE *node[20]; // keep pointers around so we can decrease_key on them later
 
@@ -431,32 +446,25 @@ int main(){
         node[i] = create_and_initialize_node(keys[i]);
         fib_heap_insert(h, node[i]);
     }
-    printf("After inserting %d keys:\n", nkeys);
+    printf(">>> After inserting %d keys:\n", nkeys);
     print_fib_heap(h);
 
+    printf(">>> Performing 1st Extract Min:\n");
     NODE *extracted = fib_heap_extract_min(h);
     printf("Extracted min: %d\n\n", extracted->key);
-    printf("After extract_min (note the merged trees from consolidate):\n");
     print_fib_heap(h);
 
-    // manually mark a node just to demonstrate how marked nodes are rendered
-    if(h->root_list && h->root_list->child){
-        h->root_list->child->mark = true;
-        printf("Manually marked node %d for demonstration:\n", h->root_list->child->key);
-        print_fib_heap(h);
-    }
-
+    printf(">>> Performing 2nd Extract Min:\n");
     extracted = fib_heap_extract_min(h);
     printf("Extracted min: %d\n\n", extracted->key);
-    printf("After extract_min (note the merged trees from consolidate):\n");
     print_fib_heap(h);
 
-    // --- find_min: just peeks, does not remove ---
+    //find_min: just peeks, does not remove
     NODE *peek = fib_heap_find_min(h);
     printf(">>> find_min: current min is %d (heap still has n=%d nodes)\n\n", peek->key, h->n);
 
-    // --- decrease_key: pick a node that is currently NOT a root, so we can
-    //     see it get cut and promoted to the root list ---
+
+    //decrease_key: pick a node that is currently NOT a root, so we can see it get cut and promoted to the root list
     printf(">>> decrease_key demo\n");
     NODE *child = NULL;
     for(int i = 0; i < nkeys; i++){
@@ -479,26 +487,22 @@ int main(){
         printf("(no non-root node available to demonstrate a cut)\n\n");
     }
 
-    // --- decrease_key misuse: trying to increase a key should be rejected ---
+    //decrease_key misuse: trying to increase a key should be rejected
     printf(">>> decrease_key with an invalid (larger) key -- should be rejected\n");
-    NODE *still_present = NULL;
-    for(int i = 0; i < nkeys; i++){
-        if(node[i] != extracted && node[i] != child){ still_present = node[i]; break; }
-    }
-    if(still_present){
-        int before = still_present->key;
-        fib_heap_decrease_key(h, still_present, before + 1000);
+    if(child){
+        int before = child->key;
+        fib_heap_decrease_key(h, child, before + 69);
         printf("attempted to raise %d -> %d; key is now %d (unchanged: %s)\n\n",
-               before, before + 1000, still_present->key,
-               still_present->key == before ? "yes" : "no");
+               before, before + 1000, child->key,
+               child->key == before ? "yes" : "no");
     }
 
-    // --- extract_min again after the decrease_key, to show it respects the new key ---
+    //extract_min again after the decrease_key, to show it respects the new min
     extracted = fib_heap_extract_min(h);
     printf(">>> extract_min after decrease_key: %d\n\n", extracted->key);
     print_fib_heap(h);
 
-    // --- drain everything else, verifying sorted order the whole way ---
+    //drain everything else, verifying sorted order
     printf(">>> draining the rest of the heap to confirm sorted extraction order\n");
     int prev = -1, ok = 1, count = 0;
     while(h->n > 0){
@@ -517,7 +521,7 @@ int main(){
     // printf("extracted val: %d, min value: %d\n", empty_extract->key, h->min->key);
 
     printf(">>> extract_min on empty heap returned: %s\n",
-           empty_extract == NULL ? "NULL (correct)" : "non-NULL (bug)");
+           empty_extract == NULL ? "NULL" : "non-NULL");
 
     return 0;
 }
