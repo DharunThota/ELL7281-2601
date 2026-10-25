@@ -1,19 +1,10 @@
-/*
- * Wolf, Goat, Cabbage river crossing problem.
- * Modelled as a state space search. Each state is a node in a tree
- * (linked using parent and child pointers). We grow the tree from the
- * start state by trying every legal move, never revisiting a state that
- * already occurred on the same path (this keeps the tree cycle free).
- * Every root to leaf path that ends in the goal state is one way of
- * solving the puzzle.
- */
-
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #define LEFT 0
 #define RIGHT 1
-#define MAX_CHILDREN 4   /* person alone, person+wolf, person+goat, person+cabbage */
+#define NUM_BOAT_STATES 4   /* person alone, person+wolf, person+goat, person+cabbage */
 
 /* a state just says which bank each of the 4 things is on */
 typedef struct State {
@@ -27,7 +18,7 @@ typedef struct State {
 typedef struct Node {
     State state;
     struct Node *parent;
-    struct Node *child[MAX_CHILDREN];
+    struct Node *child[NUM_BOAT_STATES];
     int numChild;
     int isGoal;
 } Node;
@@ -57,7 +48,7 @@ int isGoalState(State s)
 }
 
 /* walk up the parent chain to see if this state already occurred
-   earlier on the same path -- this is how we avoid cycles */
+   earlier on the same path, this is how we avoid cycles */
 int onPathAlready(Node *node, State s)
 {
     while (node != NULL) {
@@ -71,13 +62,12 @@ int onPathAlready(Node *node, State s)
 Node *makeNode(State s, Node *parent)
 {
     Node *n = (Node *) malloc(sizeof(Node));
-    int i;
 
     n->state = s;
     n->parent = parent;
     n->numChild = 0;
     n->isGoal = isGoalState(s);
-    for (i = 0; i < MAX_CHILDREN; i++)
+    for (int i = 0; i < NUM_BOAT_STATES; i++)
         n->child[i] = NULL;
     return n;
 }
@@ -93,26 +83,30 @@ void buildTree(Node *node)
         return;
     }
 
-    for (move = 0; move < MAX_CHILDREN; move++) {
+    for (move = 0; move < NUM_BOAT_STATES; move++) {
         State s = node->state;
         int otherBank = 1 - s.person;
 
         /* move 0 = go alone, 1 = take wolf, 2 = take goat, 3 = take cabbage */
         if (move == 1 && s.wolf != s.person)
+            //cant take wolf since they are on opposite banks, similar logic for move 2 and 3
             continue;
         if (move == 2 && s.goat != s.person)
             continue;
         if (move == 3 && s.cabbage != s.person)
             continue;
 
+        // move the person and item/animal to the opposite bank
         s.person = otherBank;
         if (move == 1) s.wolf = otherBank;
         if (move == 2) s.goat = otherBank;
         if (move == 3) s.cabbage = otherBank;
 
         if (!isSafe(s))
+            // dont consider an unsafe state
             continue;
         if (onPathAlready(node, s))
+            // dont consider and already existing state
             continue;
 
         node->child[node->numChild] = makeNode(s, node);
@@ -121,16 +115,32 @@ void buildTree(Node *node)
     }
 }
 
-char *bankName(int bank)
+/* put the name on the left or right list depending on the bank */
+void addToBank(int bank, char *name, char *left, char *right)
 {
-    return bank == LEFT ? "left " : "right";
+    if (bank == LEFT) {
+        strcat(left, name);
+        strcat(left, " ");
+    } else {
+        strcat(right, name);
+        strcat(right, " ");
+    }
 }
 
-void printState(State s)
+int depthOf(Node *node);
+
+/* prints the state as  step | left bank | river | right bank  */
+void printState(State s, int step)
 {
-    printf("    person: %s   wolf: %s   goat: %s   cabbage: %s\n",
-           bankName(s.person), bankName(s.wolf),
-           bankName(s.goat), bankName(s.cabbage));
+    char left[40] = "";
+    char right[40] = "";
+
+    addToBank(s.person, "Person", left, right);
+    addToBank(s.wolf, "Wolf", left, right);
+    addToBank(s.goat, "Goat", left, right);
+    addToBank(s.cabbage, "Cabbage", left, right);
+
+    printf("    Step %d  | %-26s|~~~~~~~~~~~~|  %-26s|\n", step, left, right);
 }
 
 /* print the states from the root down to this node, using the
@@ -139,7 +149,7 @@ void printPath(Node *node)
 {
     if (node->parent != NULL)
         printPath(node->parent);
-    printState(node->state);
+    printState(node->state, depthOf(node));
 }
 
 int wayCount = 0;
